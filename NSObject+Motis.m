@@ -202,7 +202,7 @@
                     if (!modifiedArray)
                         modifiedArray = [value mutableCopy];
                     
-                    [modifiedArray replaceObjectAtIndex:idx withObject:validatedObject];
+                    modifiedArray[idx] = validatedObject;
                 }
             }
             else
@@ -304,7 +304,7 @@
         if (!value)
             value = [NSNull null];
         
-        [dictionary setObject:value forKey:key];
+        dictionary[key] = value;
     }
     
     return [dictionary copy];
@@ -381,16 +381,7 @@
 + (NSDateFormatter*)mts_validationDateFormatter
 {
     // Subclasses may override and return a custom formatter.
-    
-    static NSDateFormatter *dateFormatter = nil;
-    
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        dateFormatter = [[NSDateFormatter alloc] init];
-        dateFormatter.dateFormat = @"yyyy-MM-dd HH:mm:ss";
-    });
-    
-    return dateFormatter;
+    return nil;
 }
 
 - (BOOL)mts_validateArrayObject:(inout __autoreleasing id *)ioValue forArrayKey:(NSString *)arrayKey error:(out NSError *__autoreleasing *)outError
@@ -547,7 +538,14 @@
         typeAttributes = [NSMutableDictionary dictionary];
     });
     
-    NSString *typeAttribute = typeAttributes[key];
+    NSMutableDictionary *classTypeAttributes = typeAttributes[NSStringFromClass(self.class)];
+    if (!classTypeAttributes)
+    {
+        classTypeAttributes = [NSMutableDictionary dictionary];
+        typeAttributes[NSStringFromClass(self.class)] = classTypeAttributes;
+    }
+    
+    NSString *typeAttribute = classTypeAttributes[key];
     if (typeAttribute)
         return typeAttribute;
     
@@ -558,11 +556,11 @@
     
     const char * type = property_getAttributes(property);
     
-    NSString * typeString = [NSString stringWithUTF8String:type];
+    NSString * typeString = @(type);
     NSArray * attributes = [typeString componentsSeparatedByString:@","];
-    typeAttribute = [attributes objectAtIndex:0];
+    typeAttribute = attributes[0];
     
-    typeAttributes[key] = typeAttribute;
+    classTypeAttributes[key] = typeAttribute;
     
     return typeAttribute;
 }
@@ -576,6 +574,12 @@
 {
     if ([self mts_isClassTypeTypeAttribute:typeAttribute])
     {
+        if (typeAttribute.length < 3)
+        {
+            *className = @"";
+            return;
+        }
+        
         typeAttribute = [typeAttribute substringWithRange:NSMakeRange(3, typeAttribute.length-4)];
         
         NSString *protocolNames = nil;
@@ -781,8 +785,22 @@
         if ([typeClass isSubclassOfClass:NSDate.class])
         {
             NSDateFormatter *dateFormatter = [self.class mts_validationDateFormatter];
-            *ioValue = [dateFormatter dateFromString:*ioValue];
-            return *ioValue != nil;
+            if (dateFormatter)
+            {
+                *ioValue = [dateFormatter dateFromString:*ioValue];
+                return *ioValue != nil;
+            }
+            else
+            {
+                NSNumberFormatter *formatter = [self.class mts_decimalFormatterAllowFloats];
+                NSNumber *number = [formatter numberFromString:*ioValue];
+                if (number)
+                {
+                    const NSTimeInterval timestamp = [number doubleValue];
+                    *ioValue = [NSDate dateWithTimeIntervalSince1970:timestamp];
+                    return *ioValue != nil;
+                }
+            }
         }
     }
     else if ([*ioValue isKindOfClass:NSNumber.class]) // <-- NUMBERS
